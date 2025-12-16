@@ -587,10 +587,10 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
             return mdp_family_result
         
         if family.candidate_policy is None:
-            # game_policy,game_sat = self.solve_game_abstraction(family,prop,game_solver)
-
+            #game_policy, game_sat = self.solve_game_abstraction(family,prop,game_solver)
             new_quotient = self.create_subfamily_quotient(family)
-            result = paynt.utils.game_abstraction_helper.run_molehill_for_game_abstraction(new_quotient)
+            game_policy, game_sat = paynt.utils.game_abstraction_helper.run_molehill_for_game_abstraction(new_quotient)
+           
         else:
             game_policy = family.candidate_policy
             game_sat = False
