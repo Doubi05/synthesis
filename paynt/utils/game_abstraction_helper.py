@@ -47,7 +47,7 @@ def run_molehill_for_game_abstraction(quotient):
 
     family = quotient.family
 
-    #print(family)
+    print(family)
 
     s = z3.Solver()
     constraint.solver_settings(s)
@@ -99,6 +99,7 @@ def run_molehill_for_game_abstraction(quotient):
     
     if s.check() == z3.sat:
         print("sat")
+        sat = True
         model = s.model()
         new_family = quotient.family.copy()
         new_family.add_parent_info(quotient.family)
@@ -113,7 +114,25 @@ def run_molehill_for_game_abstraction(quotient):
         prop = quotient.specification.all_properties()[0]
         result = mdp.model_check_property(prop)
         print(f"Found {new_family} with value {result}")
+        
+        label_to_int = {label: i for i, label in enumerate(quotient.action_labels)}
+        chosen_actions = []
+        hole_index = 0
+        for state_index in range(0, len(quotient.state_to_actions)):
+            if len(quotient.state_to_actions[state_index]) == 1:
+                chosen_actions.append(quotient.state_to_actions[state_index][0])
+            else:     
+                while new_family.hole_name(hole_index).startswith("sketch_hole_"):
+                    hole_index += 1              
+                option = new_family.hole_options(hole_index)[0]                 
+                label = new_family.hole_to_option_labels[hole_index][option]   
+                label_number = label_to_int[label]
+                chosen_actions.append(label_number)
+                hole_index += 1
+        print(chosen_actions)
+
     else:
         print("unsat")
+        sat = False
     print("finished")
-    exit()
+    return chosen_actions, sat
