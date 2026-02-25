@@ -11,10 +11,10 @@ import z3
 def run_molehill_for_game_abstraction(quotient):
     constraint = ExistsForallConstraint()
     constraint.set_args(SimpleNamespace(forall="sketch_hole", random=False))
-    
+   
     quotient.family.hole_to_name = [
             "sketch_hole_" + x for x in quotient.family.hole_to_name
-        ]  # feel free to change the prefix, this should just make it easier to creat exists forall queries
+        ]
     
     choice_to_hole_options = quotient.coloring.getChoiceToAssignment()
     family = quotient.family
@@ -29,8 +29,10 @@ def run_molehill_for_game_abstraction(quotient):
                 for i in quotient.state_to_actions[state]
             ]
             hole_name = f"A(S{state//2},M{state%2})"
+            
             hole_index = quotient.family.num_holes
             quotient.family.add_hole(hole_name, option_labels)
+                
             for choice in range(nci[state], nci[state + 1]):
                 action_hole_index = quotient.state_to_actions[state].index(
                     quotient.choice_to_action[choice]
@@ -68,10 +70,12 @@ def run_molehill_for_game_abstraction(quotient):
         var = z3.BitVec(name, num_bits)
         variables.append(var)
 
+
     def variables_in_ranges2(variables):
         statement = []
         for hole in range(family.num_holes):
             options = family.hole_options(hole)
+            print(options)
             # it gets guaranteed by paynt that this is actually the range
             # (these are just the indices, not the actual values in the final model :)
             assert min(options) == 0
@@ -132,6 +136,7 @@ def run_molehill_for_game_abstraction(quotient):
         print(chosen_actions)
 
     else:
+        chosen_actions = None
         print("unsat")
         sat = False
     print("finished")
