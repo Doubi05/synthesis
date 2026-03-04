@@ -3,13 +3,18 @@ import payntbind
 import math
 from molehill.mole import Mole
 from molehill.constraints import ExistsForallConstraint
-from molehill.constraints import ExistsConstraint
+from molehill.constraints import DecisionTree
 from types import SimpleNamespace
 import z3
+import argparse
 
 
 def run_molehill_for_game_abstraction(quotient):
     constraint = ExistsForallConstraint()
+    #constraint = DecisionTree(robust=True)
+    #args = argparse.Namespace(pictures='pictures', nodes=11)
+    #constraint.set_args(args)
+    
     constraint.set_args(SimpleNamespace(forall="sketch_hole", random=False))
    
     quotient.family.hole_to_name = [
@@ -53,6 +58,10 @@ def run_molehill_for_game_abstraction(quotient):
 
     s = z3.Solver()
     constraint.solver_settings(s)
+    
+    # set solver timeout in milliseconds (adjust as needed)
+    timeout_ms = 100000
+    s.set("timeout", timeout_ms)
    
     variables = []
     variables_in_ranges = None
@@ -75,7 +84,6 @@ def run_molehill_for_game_abstraction(quotient):
         statement = []
         for hole in range(family.num_holes):
             options = family.hole_options(hole)
-            print(options)
             # it gets guaranteed by paynt that this is actually the range
             # (these are just the indices, not the actual values in the final model :)
             assert min(options) == 0
@@ -100,8 +108,8 @@ def run_molehill_for_game_abstraction(quotient):
         considered_counterexamples="none",
     )
     
-    
-    if s.check() == z3.sat:
+    check_result = s.check()
+    if check_result == z3.sat:
         print("sat")
         sat = True
         model = s.model()
@@ -134,6 +142,10 @@ def run_molehill_for_game_abstraction(quotient):
                 chosen_actions.append(label_number)
                 hole_index += 1
         print(chosen_actions)
+    elif check_result == z3.unknown:
+        print("unknown, timeout")
+        chosen_actions = None
+        sat = False
 
     else:
         chosen_actions = None
