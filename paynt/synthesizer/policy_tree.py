@@ -490,6 +490,8 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
     # if True, unreachable choices will be discarded from the splitting scheduler
     discard_unreachable_choices = False
     
+    decision_tree_nodes = 0  # default, overridden by CLI
+    
     @property
     def method_name(self):
         return "AR (policy tree)"
@@ -592,8 +594,11 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
     def verify_family(self, family, game_solver, prop):
         # logger.info("investigating family of size {}".format(family.size))
         self.quotient.build(family)
+        #print(family.mdp.quotient_choice_map)
+        #print(family.mdp.quotient_state_map)
+        #print(family.mdp.states)
+        #print(family.mdp.model)
         mdp_family_result = MdpFamilyResult()
-
         if family.size == 1:
             mdp_family_result.policy = self.solve_singleton(family,prop)
             return mdp_family_result
@@ -603,12 +608,22 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
             family_copy = family.copy()
             family_copy.hole_to_name = family.hole_to_name.copy()
             family_copy.hole_to_option_labels = [labels.copy() for labels in family.hole_to_option_labels]
-            #family_copy.mdp = family.mdp
+            family_copy.mdp = family.mdp
             self.quotient.build(family_copy)
-            print(family_copy.mdp.model)
             new_quotient = self.create_subfamily_quotient(family_copy) #using smpmc
-            game_policy, game_sat = paynt.utils.game_abstraction_helper.run_molehill_for_game_abstraction(new_quotient) #using smpmc
+            game_policy_local, game_sat = paynt.utils.game_abstraction_helper.run_molehill_for_game_abstraction(new_quotient, decision_tree_nodes=self.decision_tree_nodes) #using smpmc
             
+            # Map local policy (subfamily state indices) back to full quotient state indices
+            if(game_policy_local is not None):
+                full_size = self.quotient.quotient_mdp.nr_states
+                game_policy = self.quotient.empty_policy()  # list of None, length = full_size              
+                state_map = family.mdp.quotient_state_map  # subfamily state -> full quotient state
+                for local_state, action in enumerate(game_policy_local):
+                    full_state = state_map[local_state]
+                    game_policy[full_state] = action
+            else:
+                game_policy = None
+        
         else:
             game_policy = family.candidate_policy
             game_sat = False
@@ -634,15 +649,16 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
             return mdp_family_result
 
         # undecided: choose scheduler choices to be used for splitting
-        # optimistic splitting:
+        #optimistic splitting:
         #scheduler_choices,hole_selection,state_values = self.parse_game_scheduler(game_solver)
         # pessimistic splitting:
         scheduler_choices,hole_selection,state_values = self.parse_mdp_scheduler(family, mdp_result)
+        
         splitter = self.choose_splitter(family,prop,scheduler_choices,state_values,hole_selection)
         mdp_family_result.splitter = splitter
         mdp_family_result.hole_selection = hole_selection
         return mdp_family_result
-    
+
     def choose_splitter(self, family, prop, scheduler_choices, state_values, hole_selection):
         inconsistent_assignments = {hole:options for hole,options in enumerate(hole_selection) if len(options) > 1}
         if len(inconsistent_assignments)==0:
@@ -710,18 +726,18 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
             suboptions = [options[:half], options[half:]]
 
         subfamilies = family.split(splitter,suboptions)
-        for subfamily in subfamilies:
+        #for subfamily in subfamilies:
             # Make sure each subfamily has its own copy of the list
-            subfamily.hole_to_option_labels = [list(x) for x in subfamily.hole_to_option_labels]
+            #subfamily.hole_to_option_labels = [list(x) for x in subfamily.hole_to_option_labels]
             
-            print(subfamily.hole_to_option_labels[splitter])
-            print(subfamily.hole_options(splitter))
+            #print(subfamily.hole_to_option_labels[splitter])
+            #print(subfamily.hole_options(splitter))
             
-            subfamily.hole_to_option_labels[splitter] = [subfamily.hole_to_option_labels[splitter][subfamily.hole_options(splitter)[0]]]
-            print(subfamily.hole_to_option_labels[splitter])
+            #subfamily.hole_to_option_labels[splitter] = [subfamily.hole_to_option_labels[splitter][i] for i in subfamily.hole_options(splitter)]
+            #print(subfamily.hole_to_option_labels[splitter])
             
-            subfamily.hole_set_options(splitter, [0])
-            print(subfamily.hole_options(splitter))           
+            #subfamily.hole_set_options(splitter, list(range(len(subfamily.hole_options(splitter)))))
+            #print(subfamily.hole_options(splitter))           
         for subfamily in subfamilies:
             subfamily.candidate_policy = None
 
@@ -757,6 +773,7 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
                 else:
                     policy_tree_node.sat = True
                     policy_tree_node.policy_index = policy_tree.new_policy(result.policy)
+                    #print(policy_tree_node.policy_index)
                 continue
 
             # refine
@@ -782,6 +799,7 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
         self.stat.num_leaves_merged = len(policy_tree.collect_leaves())
         self.stat.num_policies_merged = len(policy_tree.policies)
         self.policy_tree = policy_tree
+        print(policy_tree)
 
         # convert policy tree to family evaluation
         evaluations = []

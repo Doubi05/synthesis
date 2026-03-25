@@ -7,15 +7,18 @@ from molehill.constraints import DecisionTree
 from types import SimpleNamespace
 import z3
 import argparse
+import json
 
 
-def run_molehill_for_game_abstraction(quotient):
-    constraint = ExistsForallConstraint()
-    #constraint = DecisionTree(robust=True)
-    #args = argparse.Namespace(pictures='pictures', nodes=11)
-    #constraint.set_args(args)
+def run_molehill_for_game_abstraction(quotient, decision_tree_nodes=0):
+    if decision_tree_nodes > 0:
+        constraint = DecisionTree(robust=True)
+        args = argparse.Namespace(pictures='pictures', nodes=decision_tree_nodes, forall="sketch_hole")
+        constraint.set_args(args)
+    else:
+        constraint = ExistsForallConstraint()
+        constraint.set_args(SimpleNamespace(forall="sketch_hole", random=False))
     
-    constraint.set_args(SimpleNamespace(forall="sketch_hole", random=False))
    
     quotient.family.hole_to_name = [
             "sketch_hole_" + x for x in quotient.family.hole_to_name
@@ -23,8 +26,24 @@ def run_molehill_for_game_abstraction(quotient):
     
     choice_to_hole_options = quotient.coloring.getChoiceToAssignment()
     family = quotient.family
-
+    def _get_state_valuations(model):
+        """Identify variable names and extract state valuation in the same order."""
+        assert model.has_state_valuations(), "model has no state valuations"
+        # get name
+        sv = model.state_valuations
+        variable_name = None
+        state_valuations = []
+        for state in range(model.nr_states):
+            valuation = json.loads(str(sv.get_json(state)))
+            if variable_name is None:
+                variable_name = list(valuation.keys())
+            valuation = [valuation[var_name] for var_name in variable_name]
+            state_valuations.append(valuation)
+        return variable_name, state_valuations
+    var_names, state_valuations = _get_state_valuations(quotient.quotient_mdp)
+    
     nci = quotient.quotient_mdp.nondeterministic_choice_indices.copy()
+    
     for state in range(quotient.quotient_mdp.nr_states):
         if (
             len(quotient.state_to_actions[state]) > 1
@@ -33,7 +52,14 @@ def run_molehill_for_game_abstraction(quotient):
                 quotient.action_labels[i]
                 for i in quotient.state_to_actions[state]
             ]
-            hole_name = f"A(S{state//2},M{state%2})"
+            vals_here = "&".join(
+                [
+                    f"{var_name}={int(state_valuations[state][i])}"
+                    for i, var_name in enumerate(var_names)
+                    if not var_name.startswith("_loc_prism2jani")
+                ]
+            )
+            hole_name = f"A([{vals_here}])"
             
             hole_index = quotient.family.num_holes
             quotient.family.add_hole(hole_name, option_labels)
@@ -45,6 +71,7 @@ def run_molehill_for_game_abstraction(quotient):
                 choice_to_hole_options[choice].append(
                     (hole_index, action_hole_index)
                 )
+                
 
     quotient.coloring = payntbind.synthesis.Coloring(
         family.family,
@@ -54,13 +81,13 @@ def run_molehill_for_game_abstraction(quotient):
 
     family = quotient.family
 
-    print(family)
+    #print(family)
 
     s = z3.Solver()
     constraint.solver_settings(s)
     
     # set solver timeout in milliseconds (adjust as needed)
-    timeout_ms = 100000
+    timeout_ms = 15000 # 15 seconds
     s.set("timeout", timeout_ms)
    
     variables = []
@@ -86,7 +113,7 @@ def run_molehill_for_game_abstraction(quotient):
             options = family.hole_options(hole)
             # it gets guaranteed by paynt that this is actually the range
             # (these are just the indices, not the actual values in the final model :)
-            assert min(options) == 0
+            #assert min(options) == 0
             var = variables[hole]
             statement.append(z3.UGE(var, z3.BitVecVal(min(options), num_bits)))
             statement.append(z3.ULE(var, z3.BitVecVal(max(options), num_bits)))
@@ -98,8 +125,7 @@ def run_molehill_for_game_abstraction(quotient):
         constraint.build_constraint(
             f, variables, variables_in_ranges, family=family, quotient=quotient
         )
-    )
-    
+    )  
     
     p = Mole(
         s,
@@ -125,7 +151,7 @@ def run_molehill_for_game_abstraction(quotient):
         mdp = new_family.mdp
         prop = quotient.specification.all_properties()[0]
         result = mdp.model_check_property(prop)
-        print(f"Found {new_family} with value {result}")
+        #print(f"Found {new_family} with value {result}")
         
         label_to_int = {label: i for i, label in enumerate(quotient.action_labels)}
         chosen_actions = []
@@ -141,7 +167,7 @@ def run_molehill_for_game_abstraction(quotient):
                 label_number = label_to_int[label]
                 chosen_actions.append(label_number)
                 hole_index += 1
-        print(chosen_actions)
+        #print(chosen_actions)
     elif check_result == z3.unknown:
         print("unknown, timeout")
         chosen_actions = None
@@ -151,5 +177,9 @@ def run_molehill_for_game_abstraction(quotient):
         chosen_actions = None
         print("unsat")
         sat = False
-    print("finished")
+    #print("finished")
+    del s
+    del variables
+    del f
+    z3.reset_params()  # resets Z3's internal memory pools
     return chosen_actions, sat

@@ -136,6 +136,8 @@ def setup_logger(log_path = None):
 )
 @click.option("--profiling", is_flag=True, default=False,
     help="run profiling")
+@click.option("--tree-nodes", default=0, type=int,
+    help="number of nodes for molehill decision tree in policy tree synthesis")
 
 def paynt_run(
     project, sketch, props, relative_error, optimum_threshold, precision, exact, timeout,
@@ -150,7 +152,8 @@ def paynt_run(
     tree_depth, tree_enumeration, tree_map_scheduler, add_dont_care_action,
     constraint_bound,
     ce_generator,
-    profiling
+    profiling,
+    tree_nodes
 ):
 
     profiler = None
@@ -180,6 +183,8 @@ def paynt_run(
     paynt.synthesizer.decision_tree.SynthesizerDecisionTree.scheduler_path = tree_map_scheduler
     paynt.quotient.mdp.MdpQuotient.add_dont_care_action = add_dont_care_action
 
+    paynt.synthesizer.policy_tree.SynthesizerPolicyTree.decision_tree_nodes = tree_nodes
+    
     storm_control = None
     if storm_pomdp:
         storm_control = paynt.quotient.storm_pomdp_control.StormPOMDPControl()
