@@ -591,6 +591,22 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
             state_values[quotient_state] = mdp_result.result.at(state)
         return scheduler_choices,hole_selection,state_values
 
+    def _run_molehill_subprocess(self, quotient, decision_tree_nodes):
+        import multiprocessing
+        import paynt.utils.game_abstraction_helper
+        def target(q, quotient, decision_tree_nodes):
+            # Re-import inside subprocess for safety
+            result = paynt.utils.game_abstraction_helper.run_molehill_for_game_abstraction(quotient, decision_tree_nodes=decision_tree_nodes)
+            q.put(result)
+        q = multiprocessing.Queue()
+        p = multiprocessing.Process(target=target, args=(q, quotient, decision_tree_nodes))
+        p.start()
+        p.join()
+        if not q.empty():
+            return q.get()
+        else:
+            return None, False
+
     def verify_family(self, family, game_solver, prop):
         # logger.info("investigating family of size {}".format(family.size))
         self.quotient.build(family)
@@ -602,28 +618,27 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
         if family.size == 1:
             mdp_family_result.policy = self.solve_singleton(family,prop)
             return mdp_family_result
-        
+
         if family.candidate_policy is None:
-            #game_policy, game_sat = self.solve_game_abstraction(family,prop,game_solver) #using game abstraction
+            # Run in subprocess to avoid Z3 memory leaks
             family_copy = family.copy()
             family_copy.hole_to_name = family.hole_to_name.copy()
             family_copy.hole_to_option_labels = [labels.copy() for labels in family.hole_to_option_labels]
             family_copy.mdp = family.mdp
             self.quotient.build(family_copy)
-            new_quotient = self.create_subfamily_quotient(family_copy) #using smpmc
-            game_policy_local, game_sat = paynt.utils.game_abstraction_helper.run_molehill_for_game_abstraction(new_quotient, decision_tree_nodes=self.decision_tree_nodes) #using smpmc
-            
+            new_quotient = self.create_subfamily_quotient(family_copy)
+            game_policy_local, game_sat = self._run_molehill_subprocess(new_quotient, self.decision_tree_nodes) # smpmc
+
             # Map local policy (subfamily state indices) back to full quotient state indices
             if(game_policy_local is not None):
                 full_size = self.quotient.quotient_mdp.nr_states
-                game_policy = self.quotient.empty_policy()  # list of None, length = full_size              
+                game_policy = self.quotient.empty_policy()  # list of None, length = full_size
                 state_map = family.mdp.quotient_state_map  # subfamily state -> full quotient state
                 for local_state, action in enumerate(game_policy_local):
                     full_state = state_map[local_state]
                     game_policy[full_state] = action
             else:
                 game_policy = None
-        
         else:
             game_policy = family.candidate_policy
             game_sat = False
@@ -632,7 +647,7 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
         if game_sat:
             mdp_family_result.policy = game_policy
             return mdp_family_result
-        
+
         # solve primary direction for the MDP abstraction
         mdp_result = family.mdp.model_check_property(prop)
         mdp_value = mdp_result.value
@@ -640,7 +655,7 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
         self.stat.iteration(family.mdp)
         choices = []
         for s in range(family.mdp.states):
-            action = scheduler.get_choice(s)  
+            action = scheduler.get_choice(s)
             choices.append(action)
         mdp_family_result.game_policy = choices #TODO
         # logger.debug("primary-primary direction solved, value is {}".format(mdp_value))
@@ -653,7 +668,7 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
         #scheduler_choices,hole_selection,state_values = self.parse_game_scheduler(game_solver)
         # pessimistic splitting:
         scheduler_choices,hole_selection,state_values = self.parse_mdp_scheduler(family, mdp_result)
-        
+
         splitter = self.choose_splitter(family,prop,scheduler_choices,state_values,hole_selection)
         mdp_family_result.splitter = splitter
         mdp_family_result.hole_selection = hole_selection
