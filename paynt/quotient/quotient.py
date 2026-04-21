@@ -53,7 +53,6 @@ class Quotient:
         ''' to be overridden '''
         pass
 
-
     def restrict_mdp(self, mdp, choices):
         '''
         Restrict the quotient MDP to the selected actions.
@@ -62,6 +61,7 @@ class Quotient:
         :return (2) sub- to full state mapping
         :return (3) sub- to full action mapping
         '''
+       
         keep_unreachable_states = False # TODO investigate this
         all_states = stormpy.BitVector(mdp.nr_states, True)
         submodel_construction = stormpy.construct_submodel(
@@ -83,6 +83,9 @@ class Quotient:
         ''' Construct the quotient MDP for the family. '''
         # select actions compatible with the family and restrict the quotient
         choices = self.coloring.selectCompatibleChoices(family.family)
+        print(f"DEBUG build: Selected {choices.number_of_set_bits()} out of {len(choices)} choices")
+        if(choices.number_of_set_bits() < self.quotient_mdp.nr_states):
+            print(f"WARNING: Number of selected choices {choices.number_of_set_bits()} does not match number of states {self.quotient_mdp.nr_states} in the quotient MDP.")
         family.mdp = self.build_from_choice_mask(choices)
         family.selected_choices = choices
         family.mdp.family = family
