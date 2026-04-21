@@ -84,7 +84,7 @@ public:
 protected:
 
     /** Identify states of an MDP having some label. */
-    std::shared_ptr<storm::modelchecker::ExplicitQualitativeCheckResult> labelStates(
+    std::shared_ptr<storm::modelchecker::ExplicitQualitativeCheckResult<ValueType>> labelStates(
         storm::models::sparse::Mdp<ValueType> const& mdp,
         storm::logic::Formula const& label
         );
@@ -150,9 +150,9 @@ protected:
     // Modified operator formulae to apply to sub-dtmcs: P~?["__until" U "__target__"] or P~?[F "__target__"]
     std::vector<std::shared_ptr<storm::logic::Formula>> formula_modified;
     // Flags for until states
-    std::vector<std::shared_ptr<storm::modelchecker::ExplicitQualitativeCheckResult const>> mdp_untils;
+    std::vector<std::shared_ptr<storm::modelchecker::ExplicitQualitativeCheckResult<ValueType> const>> mdp_untils;
     // Flags for target states
-    std::vector<std::shared_ptr<storm::modelchecker::ExplicitQualitativeCheckResult const>> mdp_targets;
+    std::vector<std::shared_ptr<storm::modelchecker::ExplicitQualitativeCheckResult<ValueType> const>> mdp_targets;
 
     // MDP under investigation
     std::shared_ptr<storm::models::sparse::Mdp<ValueType>> mdp;

@@ -48,7 +48,7 @@ else()
 
     # Get Storm origin information
     execute_process(
-        COMMAND "${Python_EXECUTABLE}" -c "import stormpy.info; repo, tag = stormpy.info.storm_origin_info(); print(f'{repo or \"\"};{tag or \"\"}')"
+        COMMAND "${Python_EXECUTABLE}" -c "import stormpy.info; repo, tag, hash = stormpy.info.storm_origin_info(); print(f'{repo or \"\"};{tag or \"\"};{hash or \"\"}')"
         RESULT_VARIABLE _origin_result
         OUTPUT_VARIABLE STORM_ORIGIN_INFO
         ERROR_VARIABLE _origin_error
@@ -61,7 +61,7 @@ else()
     
     # Parse repo and tag
     list(GET STORM_ORIGIN_INFO 0 STORM_ORIGIN_REPO)
-    list(GET STORM_ORIGIN_INFO 1 STORM_ORIGIN_TAG)
+    list(GET STORM_ORIGIN_INFO 2 STORM_ORIGIN_TAG)
     
     message(STATUS "PAYNT - Storm origin repo: ${STORM_ORIGIN_REPO}")
     message(STATUS "PAYNT - Storm origin tag: ${STORM_ORIGIN_TAG}")
@@ -85,21 +85,17 @@ else()
     message(STATUS "PAYNT - Configured to fetch Storm from: ${STORM_GIT_REPO} (tag: ${STORM_GIT_TAG})")
 endif()
 
-# TODO REMOVE AFTER EVERYTHING IS TESTED
-# Debug output
-# message(STATUS "Final Storm configuration:")
-# message(STATUS "  STORM_DIR_HINT: ${STORM_DIR_HINT}")
-# message(STATUS "  ALLOW_STORM_SYSTEM: ${ALLOW_STORM_SYSTEM}")
-# message(STATUS "  ALLOW_STORM_FETCH: ${ALLOW_STORM_FETCH}")
-# if(DEFINED STORM_GIT_REPO AND NOT STORM_GIT_REPO STREQUAL "")
-#     message(STATUS "  STORM_GIT_REPO: ${STORM_GIT_REPO}")
-# endif()
-# if(DEFINED STORM_GIT_TAG AND NOT STORM_GIT_TAG STREQUAL "")
-#     message(STATUS "  STORM_GIT_TAG: ${STORM_GIT_TAG}")
-# endif()
+# IMPORTANT: propagate the computed Storm configuration into the CMake cache.
+#
+# `payntbind/CMakeLists.txt` declares these knobs using `option(...)` and
+# `set(... CACHE ...)` defaults. If we don't seed the cache here, those defaults
+# can overwrite the values computed above (based on `stormpy.info`), causing
+# `payntbind` to FetchContent Storm again during wheel builds.
+set(STORM_DIR_HINT "${STORM_DIR_HINT}" CACHE STRING "A hint where the Storm library can be found." FORCE)
+set(ALLOW_STORM_SYSTEM "${ALLOW_STORM_SYSTEM}" CACHE BOOL "Allow finding a storm version on the system" FORCE)
+set(ALLOW_STORM_FETCH "${ALLOW_STORM_FETCH}" CACHE BOOL "Allow fetching storm" FORCE)
+set(STORM_GIT_REPO "${STORM_GIT_REPO}" CACHE STRING "Git repo used for fetching storm" FORCE)
+set(STORM_GIT_TAG "${STORM_GIT_TAG}" CACHE STRING "Git repo tag used for fetching storm" FORCE)
 
-# return()
 
 add_subdirectory(payntbind)
-
-add_subdirectory(paynt)

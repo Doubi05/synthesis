@@ -3,7 +3,7 @@
 #include <storm/exceptions/InvalidTypeException.h>
 #include <storm/exceptions/NotSupportedException.h>
 #include <storm/storage/expressions/ExpressionEvaluator.h>
-#include <storm-pomdp/transformer/MakePOMDPCanonic.h>
+#include <storm/transformer/MakePOMDPCanonic.h>
 
 namespace synthesis {
 

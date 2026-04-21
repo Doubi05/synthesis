@@ -27,7 +27,7 @@
 namespace synthesis {
 
     template <typename ValueType, typename StateType>
-    std::shared_ptr<storm::modelchecker::ExplicitQualitativeCheckResult> CounterexampleGenerator<ValueType,StateType>::labelStates(
+    std::shared_ptr<storm::modelchecker::ExplicitQualitativeCheckResult<ValueType>> CounterexampleGenerator<ValueType,StateType>::labelStates(
         storm::models::sparse::Mdp<ValueType> const& mdp,
         storm::logic::Formula const& label
     ) {
@@ -35,7 +35,7 @@ namespace synthesis {
         bool onlyInitialStatesRelevant = false;
         storm::modelchecker::CheckTask<storm::logic::Formula, ValueType> task(label, onlyInitialStatesRelevant);
         std::unique_ptr<storm::modelchecker::CheckResult> result_ptr = storm::api::verifyWithSparseEngine<ValueType>(mdp_shared, task);
-        std::shared_ptr<storm::modelchecker::ExplicitQualitativeCheckResult> mdp_target = std::make_shared<storm::modelchecker::ExplicitQualitativeCheckResult>(result_ptr->asExplicitQualitativeCheckResult());
+        std::shared_ptr<storm::modelchecker::ExplicitQualitativeCheckResult<ValueType>> mdp_target = std::make_shared<storm::modelchecker::ExplicitQualitativeCheckResult<ValueType>>(result_ptr->asExplicitQualitativeCheckResult<ValueType>());
         return mdp_target;
     }
 
@@ -264,8 +264,8 @@ namespace synthesis {
         uint64_t sink_state_true = dtmc_states+1;
 
         // Label target states of a DTMC
-        std::shared_ptr<storm::modelchecker::ExplicitQualitativeCheckResult const> mdp_target = this->mdp_targets[formula_index];
-        std::shared_ptr<storm::modelchecker::ExplicitQualitativeCheckResult const> mdp_until = this->mdp_untils[formula_index];
+        std::shared_ptr<storm::modelchecker::ExplicitQualitativeCheckResult<ValueType> const> mdp_target = this->mdp_targets[formula_index];
+        std::shared_ptr<storm::modelchecker::ExplicitQualitativeCheckResult<ValueType> const> mdp_until = this->mdp_untils[formula_index];
         labeling_subdtmc.addLabel(this->target_label);
         labeling_subdtmc.addLabel(this->until_label);
         for(StateType state = 0; state < dtmc_states; state++) {
@@ -388,7 +388,7 @@ namespace synthesis {
             }
         }
         storm::storage::SparseMatrix<ValueType> sub_matrix = transitionMatrixBuilder.build();
-        assert(sub_matrix.isProbabilistic());
+        assert(sub_matrix.isProbabilistic(storm::utility::zero<ValueType>()));
         storm::storage::sparse::ModelComponents<ValueType> components(sub_matrix, labeling_subdtmc, reward_models_subdtmc);
         std::shared_ptr<storm::models::sparse::Model<ValueType>> subdtmc = storm::utility::builder::buildModelFromComponents(storm::models::ModelType::Dtmc, std::move(components));
         // std::cout << "[storm] sub-dtmc has " << subdtmc->getNumberOfStates() << " states" << std::endl;

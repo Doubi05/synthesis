@@ -40,11 +40,11 @@ def storm_origin_info() -> [str | None, str | None]:
     If Storm was installed (locally) as part of the installation process, these values are expected to be not None.
     Then:
       - The repo path usually takes the form of a url
-      - The tag refers to a tag on the repo.
+      - The tag refers to a tag on the repo or a specific commit hash.
     A noteworthy exception is when the fetch was from a local source dir.
     In that case, this source dir is included, and the tag reads "__local-source-dir__"
 
-    :return: A pair with the repo path and the repo tag.
+    :return: A pair with the repo path and the repo tag or specific commit hash.
     """
     return (_config.STORM_ORIGIN_REPO, _config.STORM_ORIGIN_TAG)
 

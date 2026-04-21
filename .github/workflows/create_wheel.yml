@@ -1,9 +1,18 @@
 name: Build wheels
 
 on:
+  schedule:
+    # run weekly
+    - cron: '0 10 * * 3'
   workflow_call:
   # needed to trigger the workflow manually
   workflow_dispatch:
+    inputs:
+      nightly:
+        description: 'Build nightly/dev wheels (use stormpy nightly)'
+        required: false
+        default: true
+        type: boolean
 
 jobs:
   build_wheels:
@@ -29,24 +38,108 @@ jobs:
             xcode: latest-stable
             deploy_target: 15.0
           - os: macos-arm
-            runs-on: macos-14 # macos-14+ (including latest) are ARM64 runners
+            runs-on: macos-15 # macos-15+ (including latest) are ARM64 runners
             xcode: latest-stable
-            deploy_target: 14.0
+            deploy_target: 15.0
       fail-fast: false
     steps:
+      - name: Set NIGHTLY_BUILD flag
+        run: |
+          if [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ github.event.inputs.nightly }}" == true ]]; then
+            echo "NIGHTLY_BUILD=true" >> $GITHUB_ENV
+          else
+            echo "NIGHTLY_BUILD=false" >> $GITHUB_ENV
+          fi
       - uses: actions/checkout@v6
       - uses: maxim-lobanov/setup-xcode@v1
         if: ${{ matrix.xcode != '' }}
         with:
           xcode-version: ${{ matrix.xcode }}
+      - name: Set STORMPY_ARTIFACT_NAME
+        if: env.NIGHTLY_BUILD == 'true'
+        run: |
+          case "${{ matrix.os }}" in
+            linux-intel)
+              echo "STORMPY_ARTIFACT_NAME=stormpy-wheels-linux-intel" >> $GITHUB_ENV ;;
+            linux-arm)
+              echo "STORMPY_ARTIFACT_NAME=stormpy-wheels-linux-arm" >> $GITHUB_ENV ;;
+            macos-intel)
+              echo "STORMPY_ARTIFACT_NAME=stormpy-wheels-macos-intel" >> $GITHUB_ENV ;;
+            macos-arm)
+              echo "STORMPY_ARTIFACT_NAME=stormpy-wheels-macos-arm" >> $GITHUB_ENV ;;
+            *)
+              echo "Unknown matrix.os: ${{ matrix.os }}" >&2; exit 1 ;;
+          esac
+      - name: Download stormpy nightly wheel if NIGHTLY_BUILD
+        if: env.NIGHTLY_BUILD == 'true'
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: create_wheel.yml
+          repo: stormchecker/stormpy
+          name: ${{ env.STORMPY_ARTIFACT_NAME }}
+          path: stormpy_wheels/
+      - name: Prepare nightly version
+        if: env.NIGHTLY_BUILD == 'true'
+        run: | 
+          perl -i -pe 's/__version__ = "(\d+)\.(\d+)\.(\d+)"/"__version__ = \"$1.$2.".($3+1).".dev1\""/e' paynt/_version.py
+          perl -i -pe 's/__version__ = "(\d+)\.(\d+)\.(\d+)"/"__version__ = \"$1.$2.".($3+1).".dev1\""/e' payntbind/lib/payntbind/_version.py
       - name: Build wheels
-        uses: pypa/cibuildwheel@v3.3.0
+        uses: pypa/cibuildwheel@v3.4.0
+        if: env.NIGHTLY_BUILD == 'true'
         env:
           CIBW_PLATFORM: ${{ matrix.platform }}
           CIBW_ARCHS: ${{ matrix.archs }}
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deploy_target }}
           CIBW_ENVIRONMENT: NR_JOBS=4
-      - uses: actions/upload-artifact@v5
+          CIBW_ENVIRONMENT_LINUX: NR_JOBS=4 BOOST_ROOT=/opt/boost_1_83_0 BOOST_INCLUDEDIR=/opt/boost_1_83_0/include STORM_VERSION=master
+
+          # Key: use pip as the build frontend, and pass --no-build-isolation
+          CIBW_BUILD_FRONTEND: "pip; args: --no-build-isolation"
+
+          CIBW_BEFORE_BUILD: |
+            python -m pip install -U pip
+
+            PYTAG=$(python -c "import sys; print(f'{sys.version_info.major}{sys.version_info.minor}')")
+            SOABI=$(python -c "import sysconfig; print(sysconfig.get_config_var('SOABI') or '')")
+
+            WHEEL_DIR="$(pwd)/stormpy_wheels"
+            echo "Looking for stormpy wheels in: $WHEEL_DIR"
+            ls -la "$WHEEL_DIR" || true
+
+            echo "PYTAG=$PYTAG"
+            echo "SOABI=$SOABI"
+
+            # Free-threaded builds have "t" in SOABI (e.g. cpython-314t-darwin)
+            if [[ "$PYTAG" == "314" && "$SOABI" == *"314t"* ]]; then
+              echo "Detected Python 3.14 free-threaded ($SOABI) -> installing cp314t stormpy"
+              WHEEL=$(ls "$WHEEL_DIR"/*-cp314-cp314t-*.whl 2>/dev/null | head -n 1 || true)
+            else
+              echo "Detected non-free-threaded Python ($SOABI) -> installing cp${PYTAG} stormpy"
+              WHEEL=$(ls "$WHEEL_DIR"/*-cp${PYTAG}-cp${PYTAG}-*.whl 2>/dev/null | head -n 1 || true)
+            fi
+
+            if [[ -z "${WHEEL:-}" ]]; then
+              echo "No matching stormpy wheel found for PYTAG=$PYTAG SOABI=$SOABI" >&2
+              echo "Available wheels:" >&2
+              ls -la "$WHEEL_DIR" >&2 || true
+              exit 1
+            fi
+
+            echo "Installing stormpy wheel: $WHEEL"
+            python -m pip install --force-reinstall "$WHEEL"
+            python -c "import stormpy; print('stormpy from:', stormpy.__file__)"
+            python -m pip install scikit-build-core pybind11
+      - name: Build wheels (non-nightly)
+        uses: pypa/cibuildwheel@v3.4.0
+        if: env.NIGHTLY_BUILD != 'true'
+        env:
+          CIBW_PLATFORM: ${{ matrix.platform }}
+          CIBW_ARCHS: ${{ matrix.archs }}
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deploy_target }}
+          CIBW_ENVIRONMENT: NR_JOBS=4
+          CIBW_ENVIRONMENT_LINUX: NR_JOBS=4 BOOST_ROOT=/opt/boost_1_83_0 BOOST_INCLUDEDIR=/opt/boost_1_83_0/include STORM_VERSION=master
+      - uses: actions/upload-artifact@v7
         with:
           name: paynt-wheels-${{ matrix.os }}
           path: ./wheelhouse/*.whl
@@ -56,10 +149,22 @@ jobs:
     name: Build source distribution
     runs-on: ubuntu-latest
     steps:
+      - name: Set NIGHTLY_BUILD flag
+        run: |
+          if [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ github.event.inputs.nightly }}" == true ]]; then
+            echo "NIGHTLY_BUILD=true" >> $GITHUB_ENV
+          else
+            echo "NIGHTLY_BUILD=false" >> $GITHUB_ENV
+          fi
       - uses: actions/checkout@v6
+      - name: Prepare nightly version
+        if: env.NIGHTLY_BUILD == 'true'
+        run: | 
+          perl -i -pe 's/__version__ = "(\d+)\.(\d+)\.(\d+)"/"__version__ = \"$1.$2.".($3+1).".dev1\""/e' paynt/_version.py
+          perl -i -pe 's/__version__ = "(\d+)\.(\d+)\.(\d+)"/"__version__ = \"$1.$2.".($3+1).".dev1\""/e' payntbind/lib/payntbind/_version.py
       - name: Build sdist
         run: pipx run build --sdist
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: paynt-sdist
           path: dist/*.tar.gz
@@ -89,7 +194,7 @@ jobs:
           - arch: {name: linux-arm, runner: ubuntu-24.04-arm}
             distro: archlinux:latest
     steps:
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with:
           pattern: paynt-wheels-${{ matrix.arch.name }}
           path: dist
@@ -148,11 +253,6 @@ jobs:
       fail-fast: false
       matrix:
         distro:
-          - {name: "XCode 15.4, ARM",
-             os: macos-arm,
-             distro: "macos-14",
-             xcode: "15.4"
-          }
           - {name: "XCode Latest, ARM",
              os: macos-arm,
              distro: "macos-15",
@@ -167,7 +267,7 @@ jobs:
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: ${{ matrix.distro.xcode }}
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with:
           pattern: paynt-wheels-${{ matrix.distro.os }}
           path: dist

@@ -19,6 +19,7 @@
 #include <storm/environment/solver/MultiplierEnvironment.h>
 #include <storm/exceptions/InvalidPropertyException.h>
 #include <storm/exceptions/InvalidArgumentException.h>
+#include "storm/exceptions/NotImplementedException.h"
 #include <storm/modelchecker/results/ExplicitParetoCurveCheckResult.h>
 #include <storm/logic/FragmentSpecification.h>
 
@@ -175,8 +176,8 @@ namespace synthesis {
         STORM_LOG_THROW(checkTask.isOptimizationDirectionSet(), storm::exceptions::InvalidPropertyException, "Formula needs to specify whether minimal or maximal values are to be computed on nondeterministic model.");
         std::unique_ptr<storm::modelchecker::CheckResult> leftResultPointer = this->check(env, pathFormula.getLeftSubformula());
         std::unique_ptr<storm::modelchecker::CheckResult> rightResultPointer = this->check(env, pathFormula.getRightSubformula());
-        storm::modelchecker::ExplicitQualitativeCheckResult const& leftResult = leftResultPointer->asExplicitQualitativeCheckResult();
-        storm::modelchecker::ExplicitQualitativeCheckResult const& rightResult = rightResultPointer->asExplicitQualitativeCheckResult();
+        storm::modelchecker::ExplicitQualitativeCheckResult<ValueType> const& leftResult = leftResultPointer->asExplicitQualitativeCheckResult<ValueType>();
+        storm::modelchecker::ExplicitQualitativeCheckResult<ValueType> const& rightResult = rightResultPointer->asExplicitQualitativeCheckResult<ValueType>();
 
         auto ret = synthesis::SparseSmgRpatlHelper<ValueType>::computeUntilProbabilities(env, storm::solver::SolveGoal<ValueType>(this->getModel(), checkTask), this->getModel().getTransitionMatrix(), this->getModel().getBackwardTransitions(), leftResult.getTruthValuesVector(), rightResult.getTruthValuesVector(), checkTask.isQualitativeSet(), statesOfCoalition, checkTask.isProduceSchedulersSet(), checkTask.getHint());
         std::unique_ptr<storm::modelchecker::CheckResult> result(new storm::modelchecker::ExplicitQuantitativeCheckResult<ValueType>(std::move(ret.values)));
@@ -190,7 +191,7 @@ namespace synthesis {
     std::unique_ptr<storm::modelchecker::CheckResult> SparseSmgRpatlModelChecker<ModelType>::computeGloballyProbabilities(storm::Environment const& env, storm::modelchecker::CheckTask<storm::logic::GloballyFormula, ValueType> const& checkTask) {
         storm::logic::GloballyFormula const& pathFormula = checkTask.getFormula();
         std::unique_ptr<storm::modelchecker::CheckResult> subResultPointer = this->check(env, pathFormula.getSubformula());
-        storm::modelchecker::ExplicitQualitativeCheckResult const& subResult = subResultPointer->asExplicitQualitativeCheckResult();
+        storm::modelchecker::ExplicitQualitativeCheckResult<ValueType> const& subResult = subResultPointer->asExplicitQualitativeCheckResult<ValueType>();
 
         auto ret = synthesis::SparseSmgRpatlHelper<ValueType>::computeGloballyProbabilities(env, storm::solver::SolveGoal<ValueType>(this->getModel(), checkTask), this->getModel().getTransitionMatrix(), this->getModel().getBackwardTransitions(), subResult.getTruthValuesVector(), checkTask.isQualitativeSet(), statesOfCoalition, checkTask.isProduceSchedulersSet(), checkTask.getHint());
         std::unique_ptr<storm::modelchecker::CheckResult> result(new storm::modelchecker::ExplicitQuantitativeCheckResult<ValueType>(std::move(ret.values)));
@@ -205,7 +206,7 @@ namespace synthesis {
         storm::logic::NextFormula const& pathFormula = checkTask.getFormula();
         STORM_LOG_THROW(checkTask.isOptimizationDirectionSet(), storm::exceptions::InvalidPropertyException, "Formula needs to specify whether minimal or maximal values are to be computed on nondeterministic model.");
         std::unique_ptr<storm::modelchecker::CheckResult> subResultPointer = this->check(env, pathFormula.getSubformula());
-        storm::modelchecker::ExplicitQualitativeCheckResult const& subResult = subResultPointer->asExplicitQualitativeCheckResult();
+        storm::modelchecker::ExplicitQualitativeCheckResult<ValueType> const& subResult = subResultPointer->asExplicitQualitativeCheckResult<ValueType>();
 
         auto ret = synthesis::SparseSmgRpatlHelper<ValueType>::computeNextProbabilities(env, storm::solver::SolveGoal<ValueType>(this->getModel(), checkTask), this->getModel().getTransitionMatrix(), this->getModel().getBackwardTransitions(), subResult.getTruthValuesVector(), checkTask.isQualitativeSet(), ~statesOfCoalition, checkTask.isProduceSchedulersSet(), checkTask.getHint());
         std::unique_ptr<storm::modelchecker::CheckResult> result(new storm::modelchecker::ExplicitQuantitativeCheckResult<ValueType>(std::move(ret.values)));
@@ -223,8 +224,8 @@ namespace synthesis {
 
         std::unique_ptr<storm::modelchecker::CheckResult> leftResultPointer = this->check(env, pathFormula.getLeftSubformula());
         std::unique_ptr<storm::modelchecker::CheckResult> rightResultPointer = this->check(env, pathFormula.getRightSubformula());
-        storm::modelchecker::ExplicitQualitativeCheckResult const& leftResult = leftResultPointer->asExplicitQualitativeCheckResult();
-        storm::modelchecker::ExplicitQualitativeCheckResult const& rightResult = rightResultPointer->asExplicitQualitativeCheckResult();
+        storm::modelchecker::ExplicitQualitativeCheckResult<ValueType> const& leftResult = leftResultPointer->asExplicitQualitativeCheckResult<ValueType>();
+        storm::modelchecker::ExplicitQualitativeCheckResult<ValueType> const& rightResult = rightResultPointer->asExplicitQualitativeCheckResult<ValueType>();
 
         auto ret = synthesis::SparseSmgRpatlHelper<ValueType>::computeBoundedUntilProbabilities(env, storm::solver::SolveGoal<ValueType>(this->getModel(), checkTask), this->getModel().getTransitionMatrix(), this->getModel().getBackwardTransitions(), leftResult.getTruthValuesVector(), rightResult.getTruthValuesVector(), checkTask.isQualitativeSet(), statesOfCoalition, checkTask.isProduceSchedulersSet(), checkTask.getHint(), pathFormula.getNonStrictLowerBound<uint64_t>(), pathFormula.getNonStrictUpperBound<uint64_t>());
         std::unique_ptr<storm::modelchecker::CheckResult> result(new storm::modelchecker::ExplicitQuantitativeCheckResult<ValueType>(std::move(ret.values)));
@@ -239,7 +240,7 @@ namespace synthesis {
 
         // find target states
         std::unique_ptr<storm::modelchecker::CheckResult> subResultPointer = this->check(env, eventuallyFormula.getSubformula()); // subformula is atomic label/expression formula
-        storm::modelchecker::ExplicitQualitativeCheckResult const& subResult = subResultPointer->asExplicitQualitativeCheckResult();
+        storm::modelchecker::ExplicitQualitativeCheckResult<ValueType> const& subResult = subResultPointer->asExplicitQualitativeCheckResult<ValueType>();
 
         // if hasRewardAccumulation removes certain types of rewards (e.g. state rewards)
         auto rewardModel = storm::utility::createFilteredRewardModel(this->getModel(), checkTask);
