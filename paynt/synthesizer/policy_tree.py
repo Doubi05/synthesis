@@ -764,6 +764,17 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
     
     def evaluate_all(self, family, prop, keep_value_only=False):
         assert not prop.reward, "expecting reachability probability propery"
+
+        # TODO DEBUG ONLY, REMOVE THIS
+        # debug_holes = {"o1x" : ['2'], "o1y": ['2'], "o2x": ['2'], "o2y": ['8'], "o3x": ['4'], "o3y": ['3'], "o4x": ['5'], "o4y": ['3','5','7','9'], "o5x": ['6'], "o5y": ['4'], "o6x": ['5','7','8'], "o6y": ['6']}
+        # for hole_name, hole_options in debug_holes.items():
+        #     hole_index = family.hole_to_name.index(hole_name)
+        #     hole_option_indices = []
+        #     for option in hole_options:
+        #         option_index = family.hole_to_option_labels[hole_index].index(option)
+        #         hole_option_indices.append(option_index)
+        #     family.hole_set_options(hole_index, hole_option_indices)
+
         game_solver = self.quotient.build_game_abstraction_solver(prop)
         family.candidate_policy = None
         policy_tree = PolicyTree(family)

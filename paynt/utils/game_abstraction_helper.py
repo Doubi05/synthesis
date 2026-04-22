@@ -143,7 +143,8 @@ def run_molehill_for_game_abstraction(quotient, decision_tree_nodes=0):
         new_family.add_parent_info(quotient.family)
         for hole in range(new_family.num_holes):
             var = variables[hole]
-            # if var has as_long attribute
+            if var.__str__().startswith("sketch_hole_"):
+                continue
             if hasattr(model.eval(var), "as_long"):
                 new_family.hole_set_options(hole, [model.eval(var).as_long()])
         # re-check DTMC
