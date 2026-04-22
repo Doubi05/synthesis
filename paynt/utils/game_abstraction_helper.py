@@ -11,6 +11,7 @@ import json
 
 
 def run_molehill_for_game_abstraction(quotient, decision_tree_nodes=0):
+    #decision_tree_nodes=5
     if decision_tree_nodes > 0:
         constraint = DecisionTree(robust=True)
         args = argparse.Namespace(pictures='pictures', nodes=decision_tree_nodes, forall="sketch_hole")
@@ -87,7 +88,7 @@ def run_molehill_for_game_abstraction(quotient, decision_tree_nodes=0):
     constraint.solver_settings(s)
     
     # set solver timeout in milliseconds (adjust as needed)
-    timeout_ms = 15000 # 15 seconds
+    timeout_ms = 20000 # 4 minutes
     s.set("timeout", timeout_ms)
    
     variables = []
@@ -152,7 +153,7 @@ def run_molehill_for_game_abstraction(quotient, decision_tree_nodes=0):
         mdp = new_family.mdp
         prop = quotient.specification.all_properties()[0]
         result = mdp.model_check_property(prop)
-        #print(f"Found {new_family} with value {result}")
+        print(f"Found {new_family} with value {result}")
         
         label_to_int = {label: i for i, label in enumerate(quotient.action_labels)}
         chosen_actions = []
@@ -168,6 +169,8 @@ def run_molehill_for_game_abstraction(quotient, decision_tree_nodes=0):
                 label_number = label_to_int[label]
                 chosen_actions.append(label_number)
                 hole_index += 1
+        
+        
         #print(chosen_actions)
     elif check_result == z3.unknown:
         print("unknown, timeout")

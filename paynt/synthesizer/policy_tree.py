@@ -17,7 +17,7 @@ import paynt.synthesizer.conflict_generator.mdp
 import paynt.utils.game_abstraction_helper
 import paynt.quotient.mdp_family
 
-
+import time
 import logging
 logger = logging.getLogger(__name__)
 
@@ -184,7 +184,6 @@ class PolicyTreeNode:
 
         # neither fits
         return None
-
     def merge_children_having_compatible_policies(self, quotient, prop, policies):
         if self.is_leaf:
             return
@@ -436,6 +435,17 @@ class PolicyTree:
         policies_removed = policies_before - len(self.policies)
         logger.info("removed {} policies".format(policies_removed))
 
+        # Final verification of the merged policy on the full family
+        if len(self.policies) == 1 and self.root.family.size > 1:
+            logger.info("verifying the final merged policy on the full family...")
+            full_policy, _ = self.policies[0]
+            _, full_mdp = quotient.fix_and_apply_policy_to_family(self.root.family, full_policy)
+            full_result = full_mdp.model_check_property(prop, alt=True)
+            if not full_result.sat:
+                logger.warning("merged policy does not satisfy the full family")
+            else:
+                logger.info("final policy verified for the full family")
+
         logger.info("reducing tree height...")
         nodes_before = self.root.num_nodes()
         for node in reversed(self.collect_nonleaves()):
@@ -486,7 +496,7 @@ class MdpFamilyResult:
 class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
 
     # if True, tree leaves will be double-checked after synthesis
-    double_check_policy_tree_leaves = False
+    double_check_policy_tree_leaves = True
     # if True, unreachable choices will be discarded from the splitting scheduler
     discard_unreachable_choices = False
     
@@ -610,35 +620,40 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
     def verify_family(self, family, game_solver, prop):
         # logger.info("investigating family of size {}".format(family.size))
         self.quotient.build(family)
-        #print(family.mdp.quotient_choice_map)
-        #print(family.mdp.quotient_state_map)
-        #print(family.mdp.states)
-        #print(family.mdp.model)
         mdp_family_result = MdpFamilyResult()
         if family.size == 1:
             mdp_family_result.policy = self.solve_singleton(family,prop)
             return mdp_family_result
 
         if family.candidate_policy is None:
-            # Run in subprocess to avoid Z3 memory leaks
-            family_copy = family.copy()
-            family_copy.hole_to_name = family.hole_to_name.copy()
-            family_copy.hole_to_option_labels = [labels.copy() for labels in family.hole_to_option_labels]
-            family_copy.mdp = family.mdp
-            self.quotient.build(family_copy)
-            new_quotient = self.create_subfamily_quotient(family_copy)
-            game_policy_local, game_sat = self._run_molehill_subprocess(new_quotient, self.decision_tree_nodes) # smpmc
-
-            # Map local policy (subfamily state indices) back to full quotient state indices
-            if(game_policy_local is not None):
-                full_size = self.quotient.quotient_mdp.nr_states
-                game_policy = self.quotient.empty_policy()  # list of None, length = full_size
-                state_map = family.mdp.quotient_state_map  # subfamily state -> full quotient state
-                for local_state, action in enumerate(game_policy_local):
-                    full_state = state_map[local_state]
-                    game_policy[full_state] = action
+            subprocess_start = time.time()
+            if family.size > 50:
+                #game-based
+                game_policy,game_sat = self.solve_game_abstraction(family,prop,game_solver)
             else:
-                game_policy = None
+                #SMPMC
+                # Run in subprocess to avoid Z3 memory leaks
+                family_copy = family.copy()
+                family_copy.hole_to_name = family.hole_to_name.copy()
+                family_copy.hole_to_option_labels = [labels.copy() for labels in family.hole_to_option_labels]
+                self.quotient.build(family_copy)
+                new_quotient = self.create_subfamily_quotient(family_copy)
+                game_policy_local, game_sat = self._run_molehill_subprocess(new_quotient, self.decision_tree_nodes) # smpmc
+
+                # Map local policy (subfamily state indices) back to full quotient state indices
+                if(game_policy_local is not None):
+                    full_size = self.quotient.quotient_mdp.nr_states
+                    game_policy = self.quotient.empty_policy()  # list of None, length = full_size
+                    state_map = family.mdp.quotient_state_map  # subfamily state -> full quotient state
+                    for local_state, action in enumerate(game_policy_local):
+                        full_state = state_map[local_state]
+                        game_policy[full_state] = action
+                else:
+                    game_policy = None
+            elapsed = time.time() - subprocess_start
+            self._game_abstraction_times.append(elapsed)
+            mean_time = sum(self._game_abstraction_times) / len(self._game_abstraction_times)
+            print(f"Game abstraction took {elapsed:.4f}s | mean over {len(self._game_abstraction_times)} calls: {mean_time:.4f}s")
         else:
             game_policy = family.candidate_policy
             game_sat = False
@@ -653,21 +668,18 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
         mdp_value = mdp_result.value
         scheduler = mdp_result.result.scheduler
         self.stat.iteration(family.mdp)
-        choices = []
-        for s in range(family.mdp.states):
-            action = scheduler.get_choice(s)
-            choices.append(action)
-        mdp_family_result.game_policy = choices #TODO
         # logger.debug("primary-primary direction solved, value is {}".format(mdp_value))
         if not mdp_result.sat:
             mdp_family_result.policy = False
             return mdp_family_result
 
         # undecided: choose scheduler choices to be used for splitting
-        #optimistic splitting:
-        #scheduler_choices,hole_selection,state_values = self.parse_game_scheduler(game_solver)
-        # pessimistic splitting:
-        scheduler_choices,hole_selection,state_values = self.parse_mdp_scheduler(family, mdp_result)
+        if game_policy is not None:
+            #optimistic splitting:
+            scheduler_choices,hole_selection,state_values = self.parse_game_scheduler(game_solver)
+        else:
+            # pessimistic splitting:
+            scheduler_choices,hole_selection,state_values = self.parse_mdp_scheduler(family, mdp_result)
 
         splitter = self.choose_splitter(family,prop,scheduler_choices,state_values,hole_selection)
         mdp_family_result.splitter = splitter
@@ -775,6 +787,7 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
         #         hole_option_indices.append(option_index)
         #     family.hole_set_options(hole_index, hole_option_indices)
 
+        self._game_abstraction_times = []
         game_solver = self.quotient.build_game_abstraction_solver(prop)
         family.candidate_policy = None
         policy_tree = PolicyTree(family)
@@ -784,7 +797,6 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
             # gi = self.stat.iterations_game
             # if gi is not None and gi > 1000:
             #     return None
-
             policy_tree_node = undecided_leaves.pop(-1)
             family = policy_tree_node.family
             result = self.verify_family(family,game_solver,prop)
@@ -819,6 +831,7 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
         self.stat.num_leaves = len(policy_tree.collect_leaves())
         self.stat.num_policies = len(policy_tree.policies)
         postprocessing_time = policy_tree.postprocess(self.quotient, prop)
+        policy_tree.double_check(self.quotient, prop)
         policy_tree.print_stats()
         self.stat.postprocessing_time = postprocessing_time
         self.stat.num_nodes_merged = len(policy_tree.collect_all())
