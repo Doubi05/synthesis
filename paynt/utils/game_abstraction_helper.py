@@ -5,6 +5,7 @@ from molehill.mole import Mole
 from molehill.constraints import ExistsForallConstraint
 from molehill.constraints import DecisionTree
 from types import SimpleNamespace
+from argparse import Namespace
 import z3
 import argparse
 import json
@@ -14,11 +15,10 @@ def run_molehill_for_game_abstraction(quotient, decision_tree_nodes=0):
     #decision_tree_nodes=5
     if decision_tree_nodes > 0:
         constraint = DecisionTree(robust=True)
-        args = argparse.Namespace(pictures='pictures', nodes=decision_tree_nodes, forall="sketch_hole")
-        constraint.set_args(args)
+        constraint.set_args(Namespace(forall="sketch_hole", random=False, nodes=decision_tree_nodes, pictures=None))
     else:
         constraint = ExistsForallConstraint()
-        constraint.set_args(SimpleNamespace(forall="sketch_hole", random=False))
+        constraint.set_args(Namespace(forall="sketch_hole", random=False))
     
    
     quotient.family.hole_to_name = [
@@ -88,7 +88,7 @@ def run_molehill_for_game_abstraction(quotient, decision_tree_nodes=0):
     constraint.solver_settings(s)
     
     # set solver timeout in milliseconds (adjust as needed)
-    timeout_ms = 20000 # 4 minutes
+    timeout_ms = 240000 # 4 minutes
     s.set("timeout", timeout_ms)
    
     variables = []
@@ -135,7 +135,7 @@ def run_molehill_for_game_abstraction(quotient, decision_tree_nodes=0):
         considered_counterexamples="none",
     )
     
-    check_result = s.check()
+    check_result = s.check()  
     if check_result == z3.sat:
         print("sat")
         sat = True
@@ -153,22 +153,32 @@ def run_molehill_for_game_abstraction(quotient, decision_tree_nodes=0):
         mdp = new_family.mdp
         prop = quotient.specification.all_properties()[0]
         result = mdp.model_check_property(prop)
-        print(f"Found {new_family} with value {result}")
+        #print(f"Found {new_family} with value {result}")
         
         label_to_int = {label: i for i, label in enumerate(quotient.action_labels)}
         chosen_actions = []
-        hole_index = 0
+        holes_index = 0
         for state_index in range(0, len(quotient.state_to_actions)):
             if len(quotient.state_to_actions[state_index]) == 1:
                 chosen_actions.append(quotient.state_to_actions[state_index][0])
             else:     
-                while new_family.hole_name(hole_index).startswith("sketch_hole_"):
-                    hole_index += 1              
-                option = new_family.hole_options(hole_index)[0]                 
-                label = new_family.hole_to_option_labels[hole_index][option]   
+                while new_family.hole_name(holes_index).startswith("sketch_hole_"):
+                    holes_index += 1  
+                # Compute expected hole name for verification
+                vals_here = "&".join(
+                    [
+                        f"{var_name}={int(state_valuations[state_index][i])}"
+                        for i, var_name in enumerate(var_names)
+                        if not var_name.startswith("_loc_prism2jani")
+                    ]
+                )
+                expected_hole_name = f"A([{vals_here}])"
+                assert new_family.hole_name(holes_index) == expected_hole_name, f"Hole mismatch for state {state_index}: expected {expected_hole_name}, got {new_family.hole_name(holes_index)}"            
+                option = new_family.hole_options(holes_index)[0]                 
+                label = new_family.hole_to_option_labels[holes_index][option]   
                 label_number = label_to_int[label]
                 chosen_actions.append(label_number)
-                hole_index += 1
+                holes_index += 1
         
         
         #print(chosen_actions)

@@ -83,7 +83,7 @@ class Quotient:
         ''' Construct the quotient MDP for the family. '''
         # select actions compatible with the family and restrict the quotient
         choices = self.coloring.selectCompatibleChoices(family.family)
-        print(f"DEBUG build: Selected {choices.number_of_set_bits()} out of {len(choices)} choices")
+        #print(f"DEBUG build: Selected {choices.number_of_set_bits()} out of {len(choices)} choices")
         if(choices.number_of_set_bits() < self.quotient_mdp.nr_states):
             print(f"WARNING: Number of selected choices {choices.number_of_set_bits()} does not match number of states {self.quotient_mdp.nr_states} in the quotient MDP.")
         family.mdp = self.build_from_choice_mask(choices)
