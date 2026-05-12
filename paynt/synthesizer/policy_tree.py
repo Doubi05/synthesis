@@ -31,41 +31,57 @@ import graphviz
 logging.disable(logging.NOTSET)
 
 
-def policies_are_compatible(policy1, policy2):
-    policy1,policy1_mask = policy1
-    policy2,_ = policy2
-    for state in policy1_mask:
-        a1 = policy1[state]
-        a2 = policy2[state]
+def policies_are_compatible(policy1, policy2, mask=None):
+    p1, p1_mask, p1_states = policy1
+    p2, p2_mask, p2_states = policy2
+    for state in p1_mask:
+        a1 = p1[state]
+        a2 = p2[state]
         if a2 is not None and a1 != a2:
+            return False
+    # when working with policies as DTs, we do a further check of compatibility    
+    if mask is not None:
+        pol1=True
+        pol2=True
+        for state in mask:
+            a1 = p1[state]
+            a2 = p2[state]
+            if p1_states == 1 and p2_states == 1 and a1 == a2:
+                return True
+            if a1 is None and a2 is not None:
+                pol1=False
+            if a2 is None and a1 is not None:
+                pol2=False
+        if pol1 == False and pol2 == False:
             return False
     return True
 
-def merge_policies(policy1, policy2):
+def merge_policies(policy1, policy2, mask=None):
     '''
     Attempt to merge multiple policies into one.
     :returns one policy or None if some policies were incompatible
     '''
-    if not policies_are_compatible(policy1,policy2):
+    if not policies_are_compatible(policy1,policy2, mask=mask):
         return None
-    policy1,_ = policy1
-    policy2,_ = policy2
-    policy = [a1 or policy2[state] for state,a1 in enumerate(policy1)]
-    mask = [state for state,action in enumerate(policy) if action is not None]
-    return (policy,mask)
+    p1, m1, dt1 = policy1
+    p2, m2, dt2 = policy2
+    policy = [a1 or p2[state] for state,a1 in enumerate(p1)]
+    merged_mask = [state for state,action in enumerate(policy) if action is not None]
+    dt_nodes = dt1  # keep the size of the first policy
+    return (policy, merged_mask, dt_nodes)
 
 def merge_policies_exclusively(policy1, policy2):
-    policy1,_ = policy1
-    policy2,_ = policy2
-    policy12 = policy1.copy()
-    policy21 = policy2.copy()
-    for state,a1 in enumerate(policy1):
-        a2 = policy2[state]
+    p1, _, dt1 = policy1
+    p2, _, dt2 = policy2
+    policy12 = p1.copy()
+    policy21 = p2.copy()
+    for state,a1 in enumerate(p1):
+        a2 = p2[state]
         if a1 is None:
             policy12[state] = a2
         if a2 is None:
             policy21[state] = a1
-    return policy12,policy21
+    return policy12, policy21, dt1, dt2
 
 
 class PolicyTreeNode:
@@ -163,33 +179,33 @@ class PolicyTreeNode:
             self.merge_children_indices(join_to_i)
             i += 1
 
-    def make_policies_compatible(quotient, prop, node1, node2, policies):
+    def make_policies_compatible(quotient, prop, node1, node2, policies, mask=None):       
         policy1 = policies[node1.policy_index]
         policy2 = policies[node2.policy_index]
-        policy = merge_policies(policy1,policy2)
+        policy = merge_policies(policy1,policy2, mask=mask)
         if policy is not None:
             return policy
         if SynthesizerPolicyTree.policies_as_dt:
             return None
-        policy12,policy21 = merge_policies_exclusively(policy1,policy2)
+        policy12,policy21,dt1,dt2 = merge_policies_exclusively(policy1,policy2)
 
         # try policy1 for family2
         policy,mdp = quotient.fix_and_apply_policy_to_family(node2.family, policy12)
         policy_result = mdp.model_check_property(prop, alt=True)
         PolicyTreeNode.mdps_model_checked += 1
         if policy_result.sat:
-            return policy
+            return (policy[0], policy[1], dt1)
 
         # try policy2 for family1
         policy,mdp = quotient.fix_and_apply_policy_to_family(node1.family, policy21)
         policy_result = mdp.model_check_property(prop, alt=True)
         PolicyTreeNode.mdps_model_checked += 2
         if policy_result.sat:
-            return policy
+            return (policy[0], policy[1], 0)
 
         # neither fits
         return None
-    def merge_children_having_compatible_policies(self, quotient, prop, policies):
+    def merge_children_having_compatible_policies(self, quotient, prop, policies, mask=None):
         if self.is_leaf:
             return
         i = 0
@@ -205,7 +221,7 @@ class PolicyTreeNode:
                 child2 = self.child_nodes[j]
                 if child2.sat is not True:
                     continue
-                policy = PolicyTreeNode.make_policies_compatible(quotient,prop,child1,child2,policies)
+                policy = PolicyTreeNode.make_policies_compatible(quotient,prop,child1,child2,policies, mask=mask)
                 if policy is None:
                     continue
                 # nodes can be merged
@@ -269,10 +285,10 @@ class PolicyTree:
         self.root = PolicyTreeNode(family)
         self.policies = []
 
-    def new_policy(self, policy):
+    def new_policy(self, policy, dt_nodes=0):
         policy_index = len(self.policies)
         mask = [state for state,action in enumerate(policy) if action is not None]
-        self.policies.append( (policy,mask) )
+        self.policies.append( (policy, mask, dt_nodes) )
         return policy_index
 
     def collect_all(self):
@@ -391,7 +407,7 @@ class PolicyTree:
             leaf.policy_index = policy_old_to_new[leaf.policy_index]
             assert leaf.policy_index is not None
 
-    def merge_compatible_policies(self, policy_indices):
+    def merge_compatible_policies(self, policy_indices, mask=None):
         policy_old_to_new_map = [policy_index for policy_index,_ in enumerate(self.policies)]
 
         for policy1_index_index,policy1_index in enumerate(policy_indices):
@@ -402,7 +418,7 @@ class PolicyTree:
                 policy2 = self.policies[policy2_index]
                 if policy2 is None:
                     continue
-                policy = merge_policies(policy1,policy2)
+                policy = merge_policies(policy1,policy2, mask=mask)
                 if policy is None:
                     continue
                 # store updated policy
@@ -414,51 +430,40 @@ class PolicyTree:
         
         return policy_old_to_new_map
     
-    def postprocess(self, quotient, prop):
+    def postprocess(self, quotient, prop, mask=None):
 
         postprocessing_timer = paynt.utils.timer.Timer()
         postprocessing_timer.start()
         logger.info("post-processing the policy tree...")
 
-        logger.info("merging SAT siblings solved by non-exclusively compatible policies...")
+        #logger.info("merging SAT siblings solved by non-exclusively compatible policies...")
         PolicyTreeNode.mdps_model_checked = 0
         nodes_before = self.root.num_nodes()
         for node in reversed(self.collect_all()):
-            node.merge_children_having_compatible_policies(quotient, prop, self.policies)
+            node.merge_children_having_compatible_policies(quotient, prop, self.policies, mask=mask)
         self.discard_unused_policies()
         nodes_removed = nodes_before - self.root.num_nodes()
-        logger.info("additional {} MDPs were model checked".format(PolicyTreeNode.mdps_model_checked))
+        #logger.info("additional {} MDPs were model checked".format(PolicyTreeNode.mdps_model_checked))
         logger.info("removed {} nodes".format(nodes_removed))
 
-        logger.info("merging all exclusively compatible policies...")
+        #logger.info("merging all exclusively compatible policies...")
         policies_before = len(self.policies)
         policy_indices = [index for index,_ in enumerate(self.policies)]
-        policy_old_to_new_map = self.merge_compatible_policies(policy_indices)
+        policy_old_to_new_map = self.merge_compatible_policies(policy_indices, mask=mask)
         for leaf in self.collect_sat():
             leaf.policy_index = policy_old_to_new_map[leaf.policy_index]
         self.discard_unused_policies()
         policies_removed = policies_before - len(self.policies)
         logger.info("removed {} policies".format(policies_removed))
 
-        # Final verification of the merged policy on the full family
-        if len(self.policies) == 1 and self.root.family.size > 1:
-            logger.info("verifying the final merged policy on the full family...")
-            full_policy, _ = self.policies[0]
-            _, full_mdp = quotient.fix_and_apply_policy_to_family(self.root.family, full_policy)
-            full_result = full_mdp.model_check_property(prop, alt=True)
-            if not full_result.sat:
-                logger.warning("merged policy does not satisfy the full family")
-            else:
-                logger.info("final policy verified for the full family")
-
-        logger.info("reducing tree height...")
+        #logger.info("reducing tree height...")
         nodes_before = self.root.num_nodes()
         for node in reversed(self.collect_nonleaves()):
             node.skip_redundant_children()
         nodes_removed = nodes_before - self.root.num_nodes()
         logger.info("removed {} nodes".format(nodes_removed))
 
-        logger.info("merging siblings that have the same solution...")
+        #logger.info("merging siblings that have the same solution...")
         nodes_before = self.root.num_nodes()
         for node in reversed(self.collect_nonleaves()):
             node.merge_children_having_same_solution()
@@ -469,11 +474,10 @@ class PolicyTree:
         time = int(postprocessing_timer.read())
         logger.debug(f"postprocessing took {time} s")
         return time
-
     
     def extract_policies(self, quotient):
         return {
-            f"p{policy_index}" : quotient.policy_to_state_valuation_actions(policy)
+            f"p{policy_index}" : quotient.policy_to_state_valuation_actions(policy[0])
             for policy_index,policy in enumerate(self.policies)
         }
 
@@ -497,6 +501,7 @@ class MdpFamilyResult:
         self.game_policy = None
         self.hole_selection = None
         self.splitter = None
+        self.dt_size = 0  # number of decision tree nodes for DT policies
 
 class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
 
@@ -507,6 +512,7 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
     
     decision_tree_nodes = 0  # default, overridden by CLI
     max_decision_tree_nodes = 1  # counts what the biggest decision tree tried was, for logging purposes
+    sum_decision_tree_nodes = 0  # sum of decision tree nodes for found policies
     dt_nodes_limit = 3  # if >0, stop search after this many policy tree nodes
     
     use_smpmc = False  # if True, use SMPMC for policy synthesis
@@ -624,29 +630,36 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
             quotient_state = family.mdp.quotient_state_map[state]
             state_values[quotient_state] = mdp_result.result.at(state)
         return scheduler_choices,hole_selection,state_values
+    
     def find_policy_as_dt(self, family):
         self.decision_tree_nodes = 1
         self.dt_nodes_limit = 2*self.quotient.quotient_mdp.nr_states
-        print("looking for a DT of size", self.decision_tree_nodes, "for family of size", family.size)
-        game_policy,game_sat = self.run_molehill(family)           
+        game_policy,game_sat = self.run_molehill(family) 
+        # iteratively searching for a decision tree policy with increasing 
+        # number of nodes, until we find one or reach the node limit          
         while not game_sat:
             if self.dt_nodes_limit > 0 and self.decision_tree_nodes >= self.dt_nodes_limit:
                 sys.exit("Two-level decision tree synhesis failed duo to SMPMC not being able to find a decision tree policy for some subfamily")
-            logger.warning("Molehill failed to find a satisfying decision tree")
-            self.decision_tree_nodes = round(1.5*self.decision_tree_nodes)
-            print("looking for a DT of size", self.decision_tree_nodes, "for family of size", family.size)
+            self.decision_tree_nodes = 2+self.decision_tree_nodes
             game_policy,game_sat = self.run_molehill(family)  
         if self.decision_tree_nodes > self.max_decision_tree_nodes:
             self.max_decision_tree_nodes = self.decision_tree_nodes 
+        dt_size = self.decision_tree_nodes if game_sat else 0
+        if game_sat:
+            self.sum_decision_tree_nodes += self.decision_tree_nodes
         self.decision_tree_nodes = 0
-        return game_policy,game_sat
+        return game_policy, game_sat, dt_size
     
-    def run_molehill(self,family):
+    def run_molehill(self,family): 
+        # make a copy of a family to avoid modifying the original one
+        # and build a quotient for it
         family_copy = family.copy()
         family_copy.hole_to_name = family.hole_to_name.copy()
         family_copy.hole_to_option_labels = [labels.copy() for labels in family.hole_to_option_labels]
         self.quotient.build(family_copy)
         new_quotient = self.create_subfamily_quotient(family_copy)
+        
+        # Run SMPMC in subprocess to avoid Z3 memory leaks
         game_policy_local, game_sat = self._run_molehill_subprocess(new_quotient, self.decision_tree_nodes) # smpmc
 
         # Map local policy (subfamily state indices) back to full quotient state indices
@@ -658,16 +671,17 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
                 full_state = state_map[local_state]
                 game_policy[full_state] = action
                 
+            #check that the policy has valid ations for the full quotient states
             for i, action in enumerate(game_policy):
                 if action is None:
                     continue
-                if action not in self.quotient.state_to_actions[i]:
-                    logger.warning(f"Action {action} in state {i} is not valid for the quotient MDP")
+                assert action in self.quotient.state_to_actions[i], f"Action {action} in state {i} is not valid for the quotient MDP"
         else:
             game_policy = None
         return game_policy,game_sat
     
     def _run_molehill_subprocess(self, quotient, decision_tree_nodes):
+        #running Molehill in a subprocess to avoid Z3 memory leaks
         import multiprocessing
         import traceback
         import paynt.utils.game_abstraction_helper
@@ -707,25 +721,24 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
         return None, False
 
     def verify_family(self, family, game_solver, prop):
-        # logger.info("investigating family of size {}".format(family.size))
         self.quotient.build(family)
         mdp_family_result = MdpFamilyResult()
+        
         if family.size == 1:
             mdp_family_result.policy = self.solve_singleton(family,prop)
+            # for sat families, we look for a DT when requested
             if mdp_family_result.policy and self.policies_as_dt:                            
-                game_policy, game_sat = self.find_policy_as_dt(family)
+                game_policy, game_sat, dt_size = self.find_policy_as_dt(family)
                 mdp_family_result.policy = game_policy
-            
+                mdp_family_result.dt_size = dt_size
             return mdp_family_result
-        if family.candidate_policy is None:
-            subprocess_start = time.time()
-            print("investigating family of size", family.size)           
+        
+        if family.candidate_policy is None:          
             if self.use_smpmc:
-                #SMPMC
-                # Run in subprocess to avoid Z3 memory leaks
+                # searchfor robust policy usingSMPMC              
                 game_policy,game_sat =self.run_molehill(family)
             else:
-                #game-based
+                # search for robust policy using game-based abstraction
                 game_policy,game_sat = self.solve_game_abstraction(family,prop,game_solver)
         else:
             game_policy = family.candidate_policy
@@ -733,10 +746,11 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
             
         mdp_family_result.game_policy = game_policy
         if game_sat:  
-            if self.policies_as_dt:
-                game_policy, game_sat = self.find_policy_as_dt(family)
+            # for sat families, we look for a DT when requested
+            if self.policies_as_dt: 
+                game_policy, game_sat, dt_size = self.find_policy_as_dt(family)
+                mdp_family_result.dt_size = dt_size
                     
-            #print("policy:", game_policy)
             mdp_family_result.policy = game_policy
             return mdp_family_result
 
@@ -752,10 +766,10 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
 
         # undecided: choose scheduler choices to be used for splitting
         if game_policy is not None :
-            #optimistic splitting:
+            # optimistic splitting - when using SMPMC for robust policy search:
             scheduler_choices,hole_selection,state_values = self.parse_game_scheduler(game_solver)
         else:
-            # pessimistic splitting:
+            # pessimistic splitting - when using game abstraction for robust policy search:
             scheduler_choices,hole_selection,state_values = self.parse_mdp_scheduler(family, mdp_result)
 
         splitter = self.choose_splitter(family,prop,scheduler_choices,state_values,hole_selection)
@@ -830,18 +844,7 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
             suboptions = [options[:half], options[half:]]
 
         subfamilies = family.split(splitter,suboptions)
-        #for subfamily in subfamilies:
-            # Make sure each subfamily has its own copy of the list
-            #subfamily.hole_to_option_labels = [list(x) for x in subfamily.hole_to_option_labels]
-            
-            #print(subfamily.hole_to_option_labels[splitter])
-            #print(subfamily.hole_options(splitter))
-            
-            #subfamily.hole_to_option_labels[splitter] = [subfamily.hole_to_option_labels[splitter][i] for i in subfamily.hole_options(splitter)]
-            #print(subfamily.hole_to_option_labels[splitter])
-            
-            #subfamily.hole_set_options(splitter, list(range(len(subfamily.hole_options(splitter)))))
-            #print(subfamily.hole_options(splitter))           
+                 
         for subfamily in subfamilies:
             subfamily.candidate_policy = None
 
@@ -876,7 +879,6 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
             #     return None
             policy_tree_node = undecided_leaves.pop(-1)
             family = policy_tree_node.family
-            #print("investigating family {}" .format(policy_tree_node.node_id))
             result = self.verify_family(family,game_solver,prop)
             family.candidate_policy = None
 
@@ -888,8 +890,7 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
                     policy_tree_node.sat = False
                 else:
                     policy_tree_node.sat = True
-                    policy_tree_node.policy_index = policy_tree.new_policy(result.policy)
-                    #print(policy_tree_node.policy_index)
+                    policy_tree_node.policy_index = policy_tree.new_policy(result.policy, dt_nodes=result.dt_size)
                 continue
 
             # refine
@@ -908,48 +909,30 @@ class SynthesizerPolicyTree(paynt.synthesizer.synthesizer.Synthesizer):
         self.stat.num_nodes = len(policy_tree.collect_all())
         self.stat.num_leaves = len(policy_tree.collect_leaves())
         self.stat.num_policies = len(policy_tree.policies)
-        print("max number of decision tree nodes tried: {}".format(self.max_decision_tree_nodes))
-        '''
-        for policy in policy_tree.policies:                
-            var_names, state_valuations = self._get_state_valuations(self.quotient.quotient_mdp)
-            X = state_valuations
-            Y = policy[0].copy()
-            for i in range(len(Y) - 1, -1, -1):
-                if Y[i] is None or len(self.quotient.state_to_actions[i]) == 1:
-                    del Y[i]
-                    del X[i]
-
-            clf = tree.DecisionTreeClassifier()
-            clf = clf.fit(X,Y)
-            print("DT decision tree nodes:", clf.tree_.node_count)
-        '''   
-        postprocessing_time = policy_tree.postprocess(self.quotient, prop)   
+        if self.policies_as_dt:
+            num_dt_nodes = sum(p[2] for p in policy_tree.policies if p is not None)
+            print("max number of decision tree nodes tried: {}".format(self.max_decision_tree_nodes))
+            print("sum of decision tree nodes: {}".format(num_dt_nodes))
+            print("total number of nodes in a two-level decision tree: {}".format(num_dt_nodes + self.stat.num_nodes))
+            print("--------------------")
+        if self.policies_as_dt:
+            states_with_multiple_actions_mask = [i for i,a in enumerate(self.quotient.state_to_actions) if len(a) > 1]                        
+        postprocessing_time = policy_tree.postprocess(self.quotient, prop, mask=states_with_multiple_actions_mask if self.policies_as_dt else None)   
         policy_tree.print_stats()
-        '''
-        for policy in policy_tree.policies:                
-            var_names, state_valuations = self._get_state_valuations(self.quotient.quotient_mdp)
-            X = state_valuations
-            Y = policy[0].copy()
-            for i in range(len(Y) - 1, -1, -1):
-                if Y[i] is None or len(self.quotient.state_to_actions[i]) == 1:
-                    del Y[i]
-                    del X[i]
-
-            clf = tree.DecisionTreeClassifier()
-            clf = clf.fit(X,Y)
-            print("DT decision tree nodes:", clf.tree_.node_count)
-        '''
         self.stat.postprocessing_time = postprocessing_time
         self.stat.num_nodes_merged = len(policy_tree.collect_all())
         self.stat.num_leaves_merged = len(policy_tree.collect_leaves())
         self.stat.num_policies_merged = len(policy_tree.policies)
         self.policy_tree = policy_tree
-        print(policy_tree)
-
+        if self.policies_as_dt:
+            num_dt_nodes = sum(p[2] for p in policy_tree.policies if p is not None)
+            print("sum of decision tree nodes after postprocessing: {}".format(num_dt_nodes))
+            print("total number of nodes in a two-level decision tree after postprocessing: {}".format(num_dt_nodes + self.stat.num_nodes_merged))
+            print("--------------------")
         # convert policy tree to family evaluation
         evaluations = []
         for node in policy_tree.collect_leaves():
-            policy = policy_tree.policies[node.policy_index] if node.sat else None
+            policy = policy_tree.policies[node.policy_index][0] if node.sat else None
             evaluation = paynt.synthesizer.synthesizer.FamilyEvaluation(node.family,None,node.sat,policy=policy)
             evaluations.append(evaluation)
         return evaluations

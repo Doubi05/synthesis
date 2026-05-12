@@ -83,9 +83,6 @@ class Quotient:
         ''' Construct the quotient MDP for the family. '''
         # select actions compatible with the family and restrict the quotient
         choices = self.coloring.selectCompatibleChoices(family.family)
-        #print(f"DEBUG build: Selected {choices.number_of_set_bits()} out of {len(choices)} choices")
-        if(choices.number_of_set_bits() < self.quotient_mdp.nr_states):
-            print(f"WARNING: Number of selected choices {choices.number_of_set_bits()} does not match number of states {self.quotient_mdp.nr_states} in the quotient MDP.")
         family.mdp = self.build_from_choice_mask(choices)
         family.selected_choices = choices
         family.mdp.family = family
@@ -309,7 +306,6 @@ class Quotient:
             assert mdp.family.hole_num_options(splitter) > 1
             core_suboptions = self.suboptions_half(mdp, splitter)
             other_suboptions = []
-        # print(mdp.family[splitter], core_suboptions, other_suboptions)
 
         if len(other_suboptions) == 0:
             suboptions = core_suboptions

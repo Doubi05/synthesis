@@ -119,7 +119,7 @@ class Synthesizer:
         ''' to be overridden '''
         pass
 
-    def evaluate(self, family=None, prop=None, keep_value_only=False, print_stats=True):
+    def evaluate(self, family=None, prop=None, keep_value_only=False, print_stats=False):
         '''
         Evaluate each member of the family wrt the given property.
         :param family if None, then the design space of the quotient will be used
@@ -148,6 +148,8 @@ class Synthesizer:
 
         if print_stats:
             self.stat.print()
+        
+        print("synthesis time: {:.2f} s".format(self.stat.synthesis_timer.time))
 
         return evaluations
 
